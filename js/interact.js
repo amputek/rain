@@ -1,35 +1,145 @@
-var canvas;
-var context;
-var tempcanvas;
-var tempcontext;
-var blackcanvas;
-var blackcontext;
-var raincanvas;
-var raincontext;
-var backcanvas;
-var backcontext;
+
+Math.distance = function(a,b) {
+  return Math.sqrt(Math.pow(a.x - b.x, 2) + Math.pow(a.y - b.y, 2));
+}
+Math.randomFloat = function(a,b){
+  return (Math.random() * (b-a)) + a;
+}
+Math.coin = function(a){
+    return Math.random() < a;
+}
+
+
+function Canvas( id ){
+    this.canvas = id ? document.getElementById(id) : document.createElement('canvas');
+    this.context = this.canvas.getContext('2d');
+    this.canvas.height = height;
+    this.canvas.width = width;
+    this.clear = function(){
+        this.context.clearRect( 0,0,width,height)
+    }
+    this.blendFunction = function( operator ){
+        this.context.globalCompositeOperation = operator;
+    }
+    this.getCanvas = function(){
+        return this.canvas;
+    }
+    this.drawImage = function( img, x, y, w, h ){
+        if( x == undefined ) x = 0;
+        if( y == undefined ) y = 0;
+        if( w == undefined ){
+            this.context.drawImage( img, x, y );
+        } else {
+            this.context.drawImage( img, x, y, w, h );
+        }
+
+    }
+
+    this.line = function(x1,y1,x2,y2){
+      this.context.beginPath();
+      this.context.moveTo(x1,y1);
+      this.context.lineTo(x2,y2);
+      this.context.stroke();
+    }
+
+    this.solidCircle = function(x, y, r) {
+        if( r > 0){
+            this.context.beginPath();
+            this.context.arc(x, y, r, 0, 2 * Math.PI, false);
+            this.context.fill();
+        }
+    }
+    this.solidRect = function(x,y,w,h){
+        this.context.beginPath();
+        this.context.fillRect(x,y,w,h);
+    }
+    this.setLineWidth = function(f){
+        this.context.lineWidth = f;
+    }
+    this.setAlpha = function(a){
+        this.context.globalAlpha = a;
+    }
+
+
+}
+
+var c_final
+var c_drop;
+var c_wipe;
+var c_rain;
+var c_lightning;
 
 var width;
 var height;
 
-var wrapper;
-
-var playing = false;
-var down = false;
-var touch = {x: 0, y: 0};
-var lasttouch = {x: 0, y: 0};
-
 var lightning = false;
-
 var drops = [];
 
-var img
-var bg
+var dripimg;
+var bg;
 
-var frame;
 var orientation = Math.PI;
 
 var drawLoop;
+
+
+function Touch(){
+    this.active = false;
+    this.current = {x: 0, y: 0};
+    this.last = {x: 0, y: 0};
+
+    this.Down = function(e){
+        this.active = true;
+        this.last.x = this.current.x = e.pageX;
+        this.last.y = this.current.y = e.pageY;
+    }
+
+    this.Up = function() {
+        this.active = false;
+    }
+
+
+    // TODO: add lines to a collection to be added in update cycle
+    this.Move = function(e){
+        if(this.active == true){
+            e.preventDefault();
+
+            this.last.x = this.current.x;
+            this.last.y = this.current.y;
+            this.current.x = e.pageX;
+            this.current.y = e.pageY;
+            c_wipe.context.lineWidth = Math.randomFloat(40,55);
+            c_wipe.line(this.current.x,this.current.y,this.last.x,this.last.y);
+
+            removers = [];
+            for (var i = 0; i < drops.length; i++) {
+                var d = drops[i];
+                if(Math.distance(d,this.current) < 40){
+                    if(Math.coin(0.3)) removers.push(d);
+                }
+            }
+            for (var i = 0; i < removers.length; i++) {
+                drops.splice( drops.indexOf(removers[i]), 1);
+            }
+            var c = Math.distance(this.current,this.last) * 0.015;
+            if(c > 0.4) c = 0.4;
+            if(Math.coin(c)) drops.push(new Drop(e.pageX, e.pageY+20,Math.randomFloat(1,14)));
+        }
+    }
+
+    var _this = this;
+
+    document.getElementById("wrapper").addEventListener("touchstart", function(e){ _this.Down(e); }, false);
+    document.getElementById("wrapper").addEventListener("touchend"  , function(e){ _this.Up(e); }, false);
+    document.getElementById("wrapper").addEventListener("touchmove" , function(e){ _this.Move(e); }, true);
+    document.getElementById("wrapper").addEventListener("mousemove" , function(e){ _this.Move(e); }, true);
+    document.getElementById("wrapper").addEventListener("mousedown" , function(e){ _this.Down(e); }, false);
+    document.getElementById("wrapper").addEventListener("mouseup"   , function(e){ _this.Up(e); }, false)
+
+
+
+
+}
 
 
 function Drop(x,y,r){
@@ -37,7 +147,7 @@ function Drop(x,y,r){
     this.y = y;
     this.targetr = r;
     this.r = this.targetr * 0.2;
-    this.vy = random(r+2,r+7);
+    this.vy = Math.randomFloat(r,r+7);
     this.canvas = document.createElement('canvas');
     this.context = this.canvas.getContext('2d');
 
@@ -46,14 +156,14 @@ function Drop(x,y,r){
     this.canvas.width = ar;
     this.canvas.height = ar;
 
-    this.context.globalAlpha = 0.5;
+    this.context.globalAlpha = 0.7;
     this.context.beginPath();
 
     this.context.arc(ar/2,ar/2,ar/2,0,Math.PI*2,false);
     this.context.clip();
     this.context.scale(-1,-1);
     this.context.translate(-ar,-ar)
-    this.context.drawImage(img, -5,-5,ar+10,ar+10);
+    this.context.drawImage(dripimg, -5,-5,ar+10,ar+10);
     this.context.closePath();
 
 
@@ -61,17 +171,22 @@ function Drop(x,y,r){
 
     }
 
-    this.draw = function(ctx){
+    this.draw = function(){
 
+        // ease towards target radius
         this.r += (this.targetr - this.r) * 0.1
 
-        if(random(0,1) > 0.92){
-            this.vy += random(0,2);
+        // occasionally randomly speed up
+        if( Math.coin(0.08) ){
+            this.vy += Math.randomFloat(0,2);
         }
+
+        // friction
         this.vy *= 0.9
 
-        var newx = this.x - sin(orientation) * this.vy;
-        var newy = this.y - cos(orientation) * this.vy;
+
+        var newx = this.x - Math.sin(orientation) * this.vy;
+        var newy = this.y - Math.cos(orientation) * this.vy;
 
 
         var r = this.vy / this.r
@@ -83,230 +198,159 @@ function Drop(x,y,r){
 
 
 
-        var dr = random(r*0.7,r);
+        var newr = Math.randomFloat(r*0.7,r);
         // dr = r;
 
-        this.r += (dr - this.r) * 0.05
+        // ease towards new radius
+        this.r += (newr - this.r) * 0.05
 
-        newx += random(-0.5,0.5)
-        ctx.drawImage(this.canvas,newx-this.r,newy-this.r, this.r*2, this.r*2)
+        newx += Math.randomFloat(-0.5,0.5)
+        c_drop.context.drawImage(this.canvas,newx-this.r,newy-this.r, this.r*2, this.r*2)
 
-        blackcontext.strokeStyle = 'black';
-        blackcontext.lineWidth = this.r * 2;
-        line(blackcontext,newx,newy,this.x,this.y);
-
-        // solidCircle(blackcontext,newx, newy, this.r);
+        c_wipe.context.lineWidth = this.r * 2;
+        c_wipe.line(newx,newy,this.x,this.y);
 
         this.x = newx;
         this.y = newy;
     }
 }
 
-function touchDown(e){
-    down = true;
-    lasttouch.x = touch.x = e.pageX - wrapper.offsetLeft;
-    lasttouch.y = touch.y = e.pageY - wrapper.offsetTop;
+function drawRain(){
+    c_rain.context.clearRect(0,0,width,height);
+
+    for (var i = 0; i < 300; i++) {
+        c_rain.context.lineWidth = Math.randomFloat(1,6);
+        var x  = Math.randomFloat(0,width);
+        var y  = Math.randomFloat(0,height);
+        length = Math.randomFloat(30,100);
+        var x2 = x + Math.sin( Math.randomFloat(0,0.1) ) * length;
+        var y2 = y + Math.cos( Math.randomFloat(0,0.1) ) * length;
+        c_rain.line(x,y,x2,y2);
+    };
 }
 
-function touchUp () {
-    down = false;
+function drawLightning(){
+    if( Math.coin(0.002) ) lightning = true;
+;
+    if(lightning == true){
+        if( Math.coin(0.03) ){
+            lightning = false;
+            c_lightning.context.clearRect(0,0,width,height);
+        }
+    }
+
+
+    if(lightning == true){
+        if( Math.coin(0.5) ){
+            c_lightning.solidRect(0,0,width,height)
+        } else {
+            c_lightning.context.clearRect(0,0,width,height);
+        }
+    }
+
 }
 
-function touchMove(e){
-    if(down == true){
-        e.preventDefault();
+function drawDrops(){
+    c_drop.clear();
 
-        lasttouch.x = touch.x;
-        lasttouch.y = touch.y;
-        touch.x = e.pageX - wrapper.offsetLeft;
-        touch.y = e.pageY - wrapper.offsetTop;
-        blackcontext.strokeStyle = 'black';
-        blackcontext.lineWidth = 60;
-        line(blackcontext,touch.x,touch.y,lasttouch.x,lasttouch.y)
+    var removers = [];
+    var adders = [];
 
-        removers = [];
-        for (var i = 0; i < drops.length; i++) {
-            var d = drops[i];
-            if(distance(d.x,d.y,touch.x,touch.y) < 50){
-                if(random(0,1) > 0.7) removers.push(d);
+    for (var i = 0; i < drops.length; i++) {
+        var d = drops[i];
+
+        d.draw();
+
+        // combine nearby drops into an even bigger drop
+        for(var n = i; n < drops.length; n++){
+            var d2 = drops[n];
+            if(d != d2){
+                if(Math.distance(d,d2) < 10){
+                    removers.push(d)
+                    removers.push(d2)
+                    adders.push( new Drop( (d.x + d2.x) / 2 , (d2.y + d2.y) / 2 , d.r + d2.r + 5))
+                }
             }
         }
-        for (var i = 0; i < removers.length; i++) {
-            drops.splice( drops.indexOf(removers[i]), 1);
+
+        // delete drops that are off screen
+        if(d.y > height){
+            removers.push(d);
         }
-        if(random(0,1) > 0.6) drops.push(new Drop(e.pageX, e.pageY+20,random(1,14)));
-    }
+    };
+
+    for (var i = 0; i < removers.length; i++) {
+        drops.splice( drops.indexOf(removers[i]), 1);
+    };
+
+    //add new drops
+    for (var i = 0; i < adders.length; i++) {
+        drops.push(adders[i]);
+    };
+
+}
+
+function fade(){
+    c_wipe.blendFunction( "source-over")
+    c_wipe.setAlpha( 0.1 );
+    c_wipe.drawImage(bg);
+    c_wipe.setAlpha( 1.0 );
+    c_wipe.blendFunction( "destination-out")
+}
+
+function draw() {
+    drawLoop = webkitRequestAnimationFrame( draw );
+
+    drawRain();
+    drawLightning();
+    drawDrops();
+
+    c_final.clear();
+    c_final.drawImage(c_lightning.canvas)
+    c_final.drawImage(c_rain.canvas)
+    c_final.drawImage(c_wipe.canvas)
+    c_final.drawImage(c_drop.canvas)
 }
 
 window.onload = function() {
 
-    canvas = document.getElementById('canvas');
-    context = canvas.getContext('2d');
-
-    tempcanvas = document.createElement('canvas');
-    tempcontext = tempcanvas.getContext('2d');
-
-    blackcanvas = document.createElement('canvas');
-    blackcontext = blackcanvas.getContext('2d');
-
-    raincanvas = document.createElement('canvas');
-    raincontext = raincanvas.getContext('2d');
-
-    backcanvas = document.getElementById('back-canvas');
-    backcontext = backcanvas.getContext('2d');
-
-    // var dwellImg = new Image();
-    // dwellImg.src = "images/dwell2.png"
-
-
-    width = window.innerWidth
+    width = window.innerWidth;
     height = window.innerHeight;
 
+    c_final = new Canvas( 'canvas' );
+    c_drop = new Canvas();
+    c_wipe = new Canvas();
+    c_rain = new Canvas();
+    c_lightning = new Canvas();
 
-    wrapper = document.getElementById("wrapper");
+    c_rain.context.lineCap = 'round'
+    c_rain.context.strokeStyle = 'rgba(255,255,255,0.05)'
 
+    c_wipe.context.strokeStyle = 'black';
+    c_wipe.context.lineCap = 'round'
 
-    document.getElementById("wrapper").style.width = width + "px";
-    document.getElementById("wrapper").style.height = height + "px";
-    document.getElementById("wrapper").style.marginLeft = (-width/2) + "px";
-    document.getElementById("wrapper").style.marginTop  = (-height/2) + "px";
+    c_lightning.context.fillStyle = 'rgba(255,255,255,0.05)'
 
-    backcanvas.height = raincanvas.height = blackcanvas.height = tempcanvas.height = canvas.height = height;
-    backcanvas.width = raincanvas.width = blackcanvas.width = tempcanvas.width = canvas.width = width;
-
-
-
-    blackcontext.lineCap = 'round'
-
-
-
-    img = new Image();
-    img.src = 'images/drip.jpg';
+    dripimg = new Image();
+    dripimg.src = 'images/drip.jpg';
 
     bg = new Image();
     bg.src = 'images/foreground.png';
-
-    frame = document.getElementById('frame');
-    document.getElementById("wrapper").addEventListener("touchstart", touchDown, false);
-    document.getElementById("wrapper").addEventListener("touchend", touchUp, false);
-    document.getElementById("wrapper").addEventListener("touchmove", touchMove, true);
-    document.getElementById("wrapper").addEventListener("mousemove", touchMove, true);
-    document.getElementById("wrapper").addEventListener("mousedown", touchDown, false);
-    document.getElementById("wrapper").addEventListener("mouseup", touchUp, false)
-
-
-
     bg.onload = function(){
-        blackcontext.drawImage(bg,0,0,width,height)
-        blendFunction(blackcontext, "destination-out")
-        setTimeout(function(){
-            background.style.display = "block";
-        },500);
-        // blackcontext.drawImage(dwellImg,170,200)
-        drawLoop = setInterval(draw, 1000/30);
+        c_wipe.drawImage(bg,0,0,width,height)
+        c_wipe.blendFunction("destination-out");
+        setInterval(fade, 400);
+        draw();
     }
 
+    Touch();
 
+    // window.ondevicemotion = deviceMotion;
 
+};
 
-    var rot = 0;
-    window.ondevicemotion = function(e){
-        orientation = Math.PI + e.accelerationIncludingGravity.x * 0.1;
-
-      // rot += (( (-orientation * 70) - 140 )- rot) * 0.5;
-
-      // background.style.webkitTransform = "translate3d(0,0,0) rotateZ(" + rot + "deg)";
-      // canvas.style.webkitTransform = "rotateZ(" + (-rot) + "deg)";
-
-    };
-
-    // drops.push(new Drop(175,280,random(1,6)));
-    // drops.push(new Drop(190,250,random(1,6)));
-    // drops.push(new Drop(250,250,random(1,6)));
-    // drops.push(new Drop(350,320,random(1,6)));
-    // drops.push(new Drop(450,325,random(1,6)));
-
-
-    function draw() {
-
-        if(random(0,1) > 0.98) lightning = true;
-
-        if(lightning == true){
-            if(random(0,1) > 0.95){
-                lightning = false;
-            }
-        }
-
-        tempcontext.clearRect(0,0,width,height)
-        blendFunction(blackcontext, "source-over")
-        blendFunction(blackcontext, "destination-out")
-
-        raincontext.clearRect(0,0,width,height);
-        raincontext.lineCap = 'round'
-        raincontext.strokeStyle = 'rgba(255,255,255,0.05)'
-
-        for (var i = 0; i < 300; i++) {
-            raincontext.lineWidth = random(1,6)
-            var x = random(0,width);
-            var y = random(0,height);
-            length = random(30,100);
-            var x2 = x + sin(random(0,0.1)) * length;
-            var y2 = y + cos(random(0,0.1)) * length;
-            line(raincontext,x,y,x2,y2)
-        };
-
-
-
-        // tempcontext.fillRect(0,0,width,height)
-        removers = [];
-        adders = [];
-        for (var i = 0; i < drops.length; i++) {
-            var d = drops[i];
-            d.draw(tempcontext);
-
-            for(var n = i; n < drops.length; n++){
-                var d2 = drops[n];
-                if(d != d2){
-                    if(distance(d.x,d.y,d2.x,d2.y) < 10){
-                        removers.push(d)
-                        removers.push(d2)
-                        adders.push( new Drop( (d.x + d2.x) / 2 , (d2.y + d2.y) / 2 , d.r + d2.r + 5))
-                    }
-                }
-            }
-
-            if(d.y > height){
-                removers.push(d);
-            }
-        };
-
-
-        for (var i = 0; i < removers.length; i++) {
-            drops.splice( drops.indexOf(removers[i]), 1);
-        };
-
-        if(random(0,1) > 0.94){
-            // drops.push(new Drop(random(-10,width+10),random(-10,height+10),random(1,14)));
-        }
-
-        for (var i = 0; i < adders.length; i++) {
-            drops.push(adders[i]);
-        };
-
-        backcontext.clearRect(0,0,width,height);
-        context.clearRect(0,0,width,height)
-        if(lightning == true){
-            if(random(0,1) > 0.6){
-                backcontext.fillStyle = 'rgba(255,255,255,0.15)'
-                backcontext.fillRect(0,0,width,height)
-            }
-        }
-
-        // backcontext.drawImage(foreground,0,0);
-        context.drawImage(raincanvas,0,0)
-        context.drawImage(blackcanvas,0,0);
-        context.drawImage(tempcanvas,0,0)
-    }
+function deviceMotion(e){
+    orientation = Math.PI + e.accelerationIncludingGravity.x * 0.1;
 };
 
 window.onresize = function(){
